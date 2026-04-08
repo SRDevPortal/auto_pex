@@ -10,7 +10,11 @@
  "field_order": [
   "item",
   "medication_template",
-  "healthcare_practitioner"
+  "healthcare_practitioner",
+  "diet_chart",
+  "section_validation",
+  "encounter_type",
+  "sales_type"
  ],
  "fields": [
   {
@@ -35,11 +39,40 @@
    "in_list_view": 1,
    "label": "Healthcare Practitioner",
    "options": "Healthcare Practitioner"
+  },
+  {
+   "fieldname": "diet_chart",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Diet Chart",
+   "options": "Diet Chart"
+  },
+  {
+   "fieldname": "section_validation",
+   "fieldtype": "Section Break",
+   "label": "Validation Conditions",
+   "description": "Auto Pex will only trigger when ALL filled conditions match the Patient Encounter. Leave blank to skip that check."
+  },
+  {
+   "fieldname": "encounter_type",
+   "fieldtype": "Select",
+   "in_list_view": 0,
+   "label": "Encounter Type",
+   "options": "\nFollowup\nOrder",
+   "description": "Only trigger Auto Pex for this Encounter Type (e.g. Order)"
+  },
+  {
+   "fieldname": "sales_type",
+   "fieldtype": "Link",
+   "in_list_view": 0,
+   "label": "Sales Type",
+   "options": "SR Sales Type",
+   "description": "Only trigger Auto Pex for this Sales Type (e.g. Fresh)"
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-04-06 00:00:00.000000",
+ "modified": "2026-04-08 10:35:00.000000",
  "modified_by": "Administrator",
  "module": "Auto Pex",
  "name": "Auto Pex Item Mapping",
