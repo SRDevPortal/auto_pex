@@ -2,7 +2,7 @@ app_name = "auto_pex"
 app_title = "Auto Pex"
 app_publisher = "SRIAAS"
 app_description = "Automated medication template and practitioner mapping for Patient Encounters"
-app_email = "webdevelopersriaas@gmail.com"
+app_email = "admin@example.com"
 app_license = "mit"
 
 # Apps

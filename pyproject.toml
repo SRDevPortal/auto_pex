@@ -1,7 +1,7 @@
 [project]
 name = "auto_pex"
 authors = [
-    { name = "SRIAAS", email = "webdevelopersriaas@gmail.com"}
+    { name = "SRIAAS", email = "admin@example.com"}
 ]
 description = "Automated medication template and practitioner mapping for Patient Encounters"
 requires-python = ">=3.10"
