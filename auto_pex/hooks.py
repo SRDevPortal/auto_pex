@@ -2,8 +2,16 @@ app_name = "auto_pex"
 app_title = "Auto Pex"
 app_publisher = "SRIAAS"
 app_description = "Automated medication template and practitioner mapping for Patient Encounters"
-app_email = "admin@example.com"
+app_email = "webdevelopersriaas@gmail.com"
 app_license = "mit"
+
+doc_events = {
+    "Patient Encounter": {
+        "before_save": [
+            "auto_pex.api.encounter_hooks.apply_auto_pex_mapping",
+        ],
+    },
+}
 
 # Apps
 # ------------------
@@ -136,14 +144,6 @@ app_license = "mit"
 # Document Events
 # ---------------
 # Hook on document methods and events
-
-doc_events = {
-    "Patient Encounter": {
-        "before_save": [
-            "auto_pex.api.encounter_hooks.apply_auto_pex_mapping",
-        ],
-    },
-}
 
 # Scheduled Tasks
 # ---------------
