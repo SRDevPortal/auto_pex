@@ -9,7 +9,11 @@
  "engine": "InnoDB",
  "field_order": [
   "item",
+  "is_active",
   "medication_template",
+  "ayurvedic_practitioner",
+  "homeopathic_practitioner",
+  "allopathic_practitioner",
   "healthcare_practitioner",
   "diet_chart",
   "section_validation",
@@ -27,11 +31,39 @@
    "unique": 1
   },
   {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Active"
+  },
+  {
    "fieldname": "medication_template",
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "SR Medication Template",
    "options": "SR Medication Template"
+  },
+  {
+   "fieldname": "ayurvedic_practitioner",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ayurvedic Practitioner",
+   "options": "Healthcare Practitioner"
+  },
+  {
+   "fieldname": "homeopathic_practitioner",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Homeopathic Practitioner",
+   "options": "Healthcare Practitioner"
+  },
+  {
+   "fieldname": "allopathic_practitioner",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Allopathic Practitioner",
+   "options": "Healthcare Practitioner"
   },
   {
    "fieldname": "healthcare_practitioner",
