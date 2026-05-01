@@ -34,6 +34,10 @@ ITEM_CODE_FIELDS = ["sr_item_code", "item_code"]
 # Target fields on Patient Encounter to set
 ENCOUNTER_MEDICATION_TEMPLATE_FIELD = "sr_medication_template"
 ENCOUNTER_INSTRUCTION_FIELD = "sr_pe_instruction"
+ENCOUNTER_STATUS_FIELD = "sr_encounter_status"
+
+# Encounter status to mark when Auto Pex loads medication
+PRX_READY_STATUS = "PRX Ready"
 
 # Drug-prescription child tables on Patient Encounter, routed by medication class
 DRUG_PRESCRIPTION_TABLES = {
@@ -187,6 +191,26 @@ def _set_practitioner_fields(doc, mapping: dict, enc_meta):
             doc.set("practitioner_name", details["name"])
 
 
+def _ensure_prx_ready_status():
+    """Create the PRX Ready encounter status if it is not present."""
+    if frappe.db.exists("SR Encounter Status", PRX_READY_STATUS):
+        return
+
+    status = frappe.new_doc("SR Encounter Status")
+    status.sr_status_name = PRX_READY_STATUS
+    status.is_active = 1
+    status.insert(ignore_permissions=True)
+
+
+def _set_prx_ready_status(doc, enc_meta):
+    """Mark the encounter as PRX Ready if the status field exists."""
+    if not enc_meta.has_field(ENCOUNTER_STATUS_FIELD):
+        return
+
+    _ensure_prx_ready_status()
+    doc.set(ENCOUNTER_STATUS_FIELD, PRX_READY_STATUS)
+
+
 def _populate_drug_prescription(doc, template_name: str):
     """
     Copy rows from SR Medication Template → medication-class child tables.
@@ -294,6 +318,7 @@ def apply_auto_pex_mapping(doc, method=None):
 
             # 2. Populate drug_prescription table from the template
             _populate_drug_prescription(doc, tmpl)
+            _set_prx_ready_status(doc, enc_meta)
 
         # 3. Set practitioner for each medication segment
         _set_practitioner_fields(doc, mapping, enc_meta)
