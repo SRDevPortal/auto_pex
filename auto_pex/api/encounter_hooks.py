@@ -318,7 +318,10 @@ def apply_auto_pex_mapping(doc, method=None):
 
             # 2. Populate drug_prescription table from the template
             _populate_drug_prescription(doc, tmpl)
-            _set_prx_ready_status(doc, enc_meta)
+
+            # Set PRX Ready only during first creation; later manual status changes must persist.
+            if doc.is_new():
+                _set_prx_ready_status(doc, enc_meta)
 
         # 3. Set practitioner for each medication segment
         _set_practitioner_fields(doc, mapping, enc_meta)
