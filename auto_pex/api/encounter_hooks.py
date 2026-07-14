@@ -8,6 +8,7 @@ Logic:
   - Check Validation Conditions configured on the mapping record:
       • encounter_type — if set, Patient Encounter's sr_encounter_type must match
       • sales_type     — if set, Patient Encounter's sr_sales_type must match
+      • encounter_status — if set, Patient Encounter's sr_encounter_status must match
     Blank conditions are skipped (not enforced).
   - If conditions pass, automatically:
       1. Set `sr_medication_template` on the encounter.
@@ -49,7 +50,7 @@ DRUG_PRESCRIPTION_TABLES = {
 # Diet chart field on Patient Encounter
 ENCOUNTER_DIET_CHART_FIELD = "diet_chart"
 
-# Encounter type & sales type fields on Patient Encounter
+# Validation condition fields on Patient Encounter
 ENCOUNTER_TYPE_FIELD = "sr_encounter_type"
 SALES_TYPE_FIELD = "sr_sales_type"
 
@@ -105,6 +106,13 @@ def _conditions_match(doc, mapping: dict) -> bool:
     if required_sales_type:
         actual = (getattr(doc, SALES_TYPE_FIELD, None) or "").strip()
         if actual.lower() != required_sales_type.lower():
+            return False
+
+    # Check encounter_status condition
+    required_encounter_status = (mapping.get("encounter_status") or "").strip()
+    if required_encounter_status:
+        actual = (getattr(doc, ENCOUNTER_STATUS_FIELD, None) or "").strip()
+        if actual.lower() != required_encounter_status.lower():
             return False
 
     return True
@@ -299,6 +307,7 @@ def apply_auto_pex_mapping(doc, method=None):
                 "diet_chart",
                 "encounter_type",
                 "sales_type",
+                "encounter_status",
             ],
             as_dict=True,
         )

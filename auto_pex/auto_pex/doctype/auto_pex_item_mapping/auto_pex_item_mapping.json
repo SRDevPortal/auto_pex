@@ -18,7 +18,8 @@
   "diet_chart",
   "section_validation",
   "encounter_type",
-  "sales_type"
+  "sales_type",
+  "encounter_status"
  ],
  "fields": [
   {
@@ -100,6 +101,14 @@
    "label": "Sales Type",
    "options": "SR Sales Type",
    "description": "Only trigger Auto Pex for this Sales Type (e.g. Fresh)"
+  },
+  {
+   "fieldname": "encounter_status",
+   "fieldtype": "Link",
+   "in_list_view": 0,
+   "label": "Encounter Status",
+   "options": "SR Encounter Status",
+   "description": "Only trigger Auto Pex for this Encounter Status"
   }
  ],
  "index_web_pages_for_search": 0,
