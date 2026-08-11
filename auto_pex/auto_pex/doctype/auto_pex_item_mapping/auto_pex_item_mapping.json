@@ -16,6 +16,7 @@
   "allopathic_practitioner",
   "healthcare_practitioner",
   "diet_chart",
+  "set_encounter_status",
   "section_validation",
   "encounter_type",
   "sales_type",
@@ -81,6 +82,14 @@
    "options": "Diet Chart"
   },
   {
+   "fieldname": "set_encounter_status",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Set Encounter Status",
+   "options": "SR Encounter Status",
+   "description": "Set this status after all Auto Pex conditions match. With Current Encounter Status blank, only new or Draft encounters are updated so later workflow statuses are preserved."
+  },
+  {
    "fieldname": "section_validation",
    "fieldtype": "Section Break",
    "label": "Validation Conditions",
@@ -106,9 +115,9 @@
    "fieldname": "encounter_status",
    "fieldtype": "Link",
    "in_list_view": 0,
-   "label": "Encounter Status",
+   "label": "Current Encounter Status",
    "options": "SR Encounter Status",
-   "description": "Only trigger Auto Pex for this Encounter Status"
+   "description": "Only trigger Auto Pex when the Patient Encounter currently has this status. Leave blank to skip this condition."
   }
  ],
  "index_web_pages_for_search": 0,

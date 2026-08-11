@@ -19,6 +19,7 @@ Logic:
       3. Copy template header instruction → `sr_pe_instruction`.
       4. Set Ayurvedic/Homeopathic/Allopathic practitioners on the encounter.
       5. Set `diet_chart` on the encounter (if mapped).
+      6. Set the configured encounter status when creating the encounter (if mapped).
   - If 0 or 2+ draft-invoice items exist, exit silently — no changes.
 """
 
@@ -36,9 +37,6 @@ ITEM_CODE_FIELDS = ["sr_item_code", "item_code"]
 ENCOUNTER_MEDICATION_TEMPLATE_FIELD = "sr_medication_template"
 ENCOUNTER_INSTRUCTION_FIELD = "sr_pe_instruction"
 ENCOUNTER_STATUS_FIELD = "sr_encounter_status"
-
-# Encounter status to mark when Auto Pex loads medication
-PRX_READY_STATUS = "PRX Ready"
 
 # Drug-prescription child tables on Patient Encounter, routed by medication class
 DRUG_PRESCRIPTION_TABLES = {
@@ -199,24 +197,26 @@ def _set_practitioner_fields(doc, mapping: dict, enc_meta):
             doc.set("practitioner_name", details["name"])
 
 
-def _ensure_prx_ready_status():
-    """Create the PRX Ready encounter status if it is not present."""
-    if frappe.db.exists("SR Encounter Status", PRX_READY_STATUS):
+def _set_mapped_encounter_status(doc, mapping: dict, enc_meta):
+    """Set the configured output status without resetting later workflow states."""
+    target_status = mapping.get("set_encounter_status")
+    if not target_status or not enc_meta.has_field(ENCOUNTER_STATUS_FIELD):
         return
 
-    status = frappe.new_doc("SR Encounter Status")
-    status.sr_status_name = PRX_READY_STATUS
-    status.is_active = 1
-    status.insert(ignore_permissions=True)
+    current_status = (getattr(doc, ENCOUNTER_STATUS_FIELD, None) or "").strip()
+    required_current_status = (mapping.get("encounter_status") or "").strip()
 
-
-def _set_prx_ready_status(doc, enc_meta):
-    """Mark the encounter as PRX Ready if the status field exists."""
-    if not enc_meta.has_field(ENCOUNTER_STATUS_FIELD):
-        return
-
-    _ensure_prx_ready_status()
-    doc.set(ENCOUNTER_STATUS_FIELD, PRX_READY_STATUS)
+    # Some encounter flows create the document before order items are added. In that
+    # case Auto Pex first matches on a later save, while the encounter is still Draft.
+    # A configured current-status condition is also a deliberate one-way transition:
+    # after the target is set, that condition normally stops matching on later saves.
+    can_set_status = (
+        doc.is_new()
+        or current_status.lower() in ("", "draft")
+        or bool(required_current_status)
+    )
+    if can_set_status:
+        doc.set(ENCOUNTER_STATUS_FIELD, target_status)
 
 
 def _populate_drug_prescription(doc, template_name: str):
@@ -281,7 +281,8 @@ def apply_auto_pex_mapping(doc, method=None):
 
     Checks draft invoice items. If exactly one item is present and a mapping
     exists for it, validates configured conditions then populates the medication
-    template, drug prescription rows, practitioner, and diet chart fields.
+    template, drug prescription rows, practitioner, diet chart, and configured
+    output encounter status.
     """
     try:
         rows = doc.get(DRAFT_INVOICE_TABLE) or []
@@ -308,6 +309,7 @@ def apply_auto_pex_mapping(doc, method=None):
                 "encounter_type",
                 "sales_type",
                 "encounter_status",
+                "set_encounter_status",
             ],
             as_dict=True,
         )
@@ -328,10 +330,6 @@ def apply_auto_pex_mapping(doc, method=None):
             # 2. Populate drug_prescription table from the template
             _populate_drug_prescription(doc, tmpl)
 
-            # Set PRX Ready only during first creation; later manual status changes must persist.
-            if doc.is_new():
-                _set_prx_ready_status(doc, enc_meta)
-
         # 3. Set practitioner for each medication segment
         _set_practitioner_fields(doc, mapping, enc_meta)
 
@@ -339,6 +337,9 @@ def apply_auto_pex_mapping(doc, method=None):
         diet_chart = mapping.get("diet_chart")
         if diet_chart and enc_meta.has_field(ENCOUNTER_DIET_CHART_FIELD):
             doc.set(ENCOUNTER_DIET_CHART_FIELD, diet_chart)
+
+        # 5. Set the configured status without resetting later workflow changes.
+        _set_mapped_encounter_status(doc, mapping, enc_meta)
 
     except Exception:
         # Non-fatal — log but never block the save

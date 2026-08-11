@@ -9,6 +9,21 @@ from frappe.model.document import Document
 class AutoPexItemMapping(Document):
 	def validate(self):
 		self.validate_practitioner_pathy()
+		self.validate_set_encounter_status()
+
+	def validate_set_encounter_status(self):
+		target_status = self.get("set_encounter_status")
+		if not target_status:
+			return
+
+		is_active = frappe.db.get_value("SR Encounter Status", target_status, "is_active")
+		if not is_active:
+			frappe.throw(
+				_("Set Encounter Status must be active. Selected status {0} is inactive.").format(
+					frappe.bold(target_status)
+				),
+				title=_("Invalid Encounter Status"),
+			)
 
 	def validate_practitioner_pathy(self):
 		if not frappe.db.has_column("Healthcare Practitioner", "sr_pathy"):

@@ -4,13 +4,28 @@ from uuid import uuid4
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from auto_pex.api.encounter_hooks import _conditions_match
+from auto_pex.api.encounter_hooks import _conditions_match, _set_mapped_encounter_status
 
 
-def _make_inactive_status_mapping():
-	suffix = uuid4().hex[:8]
-	status_name = f"AUTO PEX TEST INACTIVE {suffix}"
-	item_code = frappe.db.sql(
+class _EncounterStub:
+	def __init__(self, status, is_new):
+		self.sr_encounter_status = status
+		self._is_new = is_new
+
+	def is_new(self):
+		return self._is_new
+
+	def set(self, fieldname, value):
+		setattr(self, fieldname, value)
+
+
+class _EncounterMetaStub:
+	def has_field(self, fieldname):
+		return fieldname == "sr_encounter_status"
+
+
+def _get_unmapped_item_code():
+	return frappe.db.sql(
 		"""
 		select item.name
 		from `tabItem` item
@@ -19,6 +34,12 @@ def _make_inactive_status_mapping():
 		limit 1
 		"""
 	)[0][0]
+
+
+def _make_inactive_status_mapping():
+	suffix = uuid4().hex[:8]
+	status_name = f"AUTO PEX TEST INACTIVE {suffix}"
+	item_code = _get_unmapped_item_code()
 
 	frappe.get_doc(
 		{
@@ -69,6 +90,34 @@ def run_mock_test():
 		"case_insensitive_match": _conditions_match(encounter, case_insensitive),
 	}
 
+	new_encounter = _EncounterStub(status="Draft", is_new=True)
+	_set_mapped_encounter_status(
+		new_encounter,
+		{"set_encounter_status": "PRX Ready"},
+		_EncounterMetaStub(),
+	)
+	results["configured_status_set_on_new_encounter"] = (
+		new_encounter.sr_encounter_status == "PRX Ready"
+	)
+
+	existing_encounter = _EncounterStub(status="Ready to Dispatch", is_new=False)
+	_set_mapped_encounter_status(
+		existing_encounter,
+		{"set_encounter_status": "PRX Ready"},
+		_EncounterMetaStub(),
+	)
+	results["existing_encounter_status_preserved"] = (
+		existing_encounter.sr_encounter_status == "Ready to Dispatch"
+	)
+
+	draft_encounter = _EncounterStub(status="Draft", is_new=False)
+	_set_mapped_encounter_status(
+		draft_encounter,
+		{"encounter_status": "", "set_encounter_status": "PRX Ready"},
+		_EncounterMetaStub(),
+	)
+	results["existing_draft_status_set"] = draft_encounter.sr_encounter_status == "PRX Ready"
+
 	savepoint = "auto_pex_encounter_status_mock_test"
 	frappe.db.savepoint(savepoint)
 	try:
@@ -77,6 +126,21 @@ def run_mock_test():
 			mapping.encounter_status == status_name
 			and frappe.db.get_value("SR Encounter Status", status_name, "is_active") == 0
 		)
+
+		invalid_output_mapping = frappe.get_doc(
+			{
+				"doctype": "Auto Pex Item Mapping",
+				"item": _get_unmapped_item_code(),
+				"is_active": 1,
+				"set_encounter_status": status_name,
+			}
+		)
+		try:
+			invalid_output_mapping.insert(ignore_permissions=True)
+		except frappe.ValidationError:
+			results["inactive_output_status_rejected"] = True
+		else:
+			results["inactive_output_status_rejected"] = False
 	finally:
 		frappe.db.rollback(save_point=savepoint)
 	results["mock_data_rolled_back"] = not frappe.db.exists(
@@ -129,3 +193,84 @@ class TestAutoPexEncounterStatusCondition(FrappeTestCase):
 			frappe.db.get_value("SR Encounter Status", status_name, "is_active"),
 			0,
 		)
+
+	def test_mapping_rejects_inactive_output_status(self):
+		status_name = f"AUTO PEX TEST OUTPUT INACTIVE {uuid4().hex[:8]}"
+		frappe.get_doc(
+			{
+				"doctype": "SR Encounter Status",
+				"sr_status_name": status_name,
+				"is_active": 0,
+			}
+		).insert(ignore_permissions=True)
+
+		mapping = frappe.get_doc(
+			{
+				"doctype": "Auto Pex Item Mapping",
+				"item": _get_unmapped_item_code(),
+				"is_active": 1,
+				"set_encounter_status": status_name,
+			}
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			mapping.insert(ignore_permissions=True)
+
+
+class TestAutoPexEncounterStatusOutput(FrappeTestCase):
+	def setUp(self):
+		self.meta = _EncounterMetaStub()
+
+	def test_configured_status_is_set_on_new_encounter(self):
+		encounter = _EncounterStub(status="Draft", is_new=True)
+
+		_set_mapped_encounter_status(
+			encounter,
+			{"set_encounter_status": "PRX Ready"},
+			self.meta,
+		)
+
+		self.assertEqual(encounter.sr_encounter_status, "PRX Ready")
+
+	def test_blank_output_status_leaves_status_unchanged(self):
+		encounter = _EncounterStub(status="Draft", is_new=True)
+
+		_set_mapped_encounter_status(encounter, {"set_encounter_status": ""}, self.meta)
+
+		self.assertEqual(encounter.sr_encounter_status, "Draft")
+
+	def test_existing_encounter_status_is_preserved(self):
+		encounter = _EncounterStub(status="Ready to Dispatch", is_new=False)
+
+		_set_mapped_encounter_status(
+			encounter,
+			{"set_encounter_status": "PRX Ready"},
+			self.meta,
+		)
+
+		self.assertEqual(encounter.sr_encounter_status, "Ready to Dispatch")
+
+	def test_existing_draft_encounter_receives_configured_status(self):
+		encounter = _EncounterStub(status="Draft", is_new=False)
+
+		_set_mapped_encounter_status(
+			encounter,
+			{"encounter_status": "", "set_encounter_status": "PRX Ready"},
+			self.meta,
+		)
+
+		self.assertEqual(encounter.sr_encounter_status, "PRX Ready")
+
+	def test_explicit_current_status_allows_existing_status_transition(self):
+		encounter = _EncounterStub(status="Payment Approved", is_new=False)
+
+		_set_mapped_encounter_status(
+			encounter,
+			{
+				"encounter_status": "Payment Approved",
+				"set_encounter_status": "PRX Requested",
+			},
+			self.meta,
+		)
+
+		self.assertEqual(encounter.sr_encounter_status, "PRX Requested")
