@@ -2,9 +2,20 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from auto_pex.api.encounter_hooks import _conditions_match, _set_mapped_encounter_status
+
+# Each database test creates its own records. Following these links otherwise
+# loads unrelated ERPNext company/tax fixtures before Auto Pex tests can run.
+IGNORE_TEST_RECORD_DEPENDENCIES = [
+	"Item",
+	"SR Medication Template",
+	"Healthcare Practitioner",
+	"Diet Chart",
+	"SR Encounter Status",
+	"SR Sales Type",
+]
 
 
 class _EncounterStub:
@@ -25,15 +36,37 @@ class _EncounterMetaStub:
 
 
 def _get_unmapped_item_code():
-	return frappe.db.sql(
-		"""
-		select item.name
-		from `tabItem` item
-		left join `tabAuto Pex Item Mapping` mapping on mapping.item = item.name
-		where mapping.name is null
-		limit 1
-		"""
-	)[0][0]
+	"""Create a test-owned item instead of depending on live business records."""
+	# India Compliance validates HSN/SAC even for non-stock test Items.
+	if not frappe.db.exists("GST HSN Code", "999900"):
+		frappe.get_doc({"doctype": "GST HSN Code", "hsn_code": "999900"}).insert(ignore_permissions=True)
+	suffix = uuid4().hex[:8]
+	group = frappe.get_doc(
+		{
+			"doctype": "Item Group",
+			"item_group_name": f"Auto Pex Test {suffix}",
+			"parent_item_group": "All Item Groups",
+			"is_group": 0,
+		}
+	).insert(ignore_permissions=True)
+	uom = frappe.get_doc({"doctype": "UOM", "uom_name": f"Auto Pex Test {suffix}"}).insert(
+		ignore_permissions=True
+	)
+	return (
+		frappe.get_doc(
+			{
+				"doctype": "Item",
+				"item_code": f"AUTO-PEX-TEST-{suffix}",
+				"item_name": f"Auto Pex Test {suffix}",
+				"item_group": group.name,
+				"stock_uom": uom.name,
+				"is_stock_item": 0,
+				"gst_hsn_code": "999900",
+			}
+		)
+		.insert(ignore_permissions=True)
+		.name
+	)
 
 
 def _make_inactive_status_mapping():
@@ -55,7 +88,6 @@ def _make_inactive_status_mapping():
 			"item": item_code,
 			"is_active": 1,
 			"encounter_type": "Order",
-			"sales_type": "Fresh",
 			"encounter_status": status_name,
 		}
 	).insert(ignore_permissions=True)
@@ -96,9 +128,7 @@ def run_mock_test():
 		{"set_encounter_status": "PRX Ready"},
 		_EncounterMetaStub(),
 	)
-	results["configured_status_set_on_new_encounter"] = (
-		new_encounter.sr_encounter_status == "PRX Ready"
-	)
+	results["configured_status_set_on_new_encounter"] = new_encounter.sr_encounter_status == "PRX Ready"
 
 	existing_encounter = _EncounterStub(status="Ready to Dispatch", is_new=False)
 	_set_mapped_encounter_status(
@@ -153,8 +183,9 @@ def run_mock_test():
 	return results
 
 
-class TestAutoPexEncounterStatusCondition(FrappeTestCase):
+class TestAutoPexEncounterStatusCondition(IntegrationTestCase):
 	def setUp(self):
+		super().setUp()
 		self.encounter = SimpleNamespace(
 			sr_encounter_type="Order",
 			sr_sales_type="Fresh",
@@ -217,8 +248,9 @@ class TestAutoPexEncounterStatusCondition(FrappeTestCase):
 			mapping.insert(ignore_permissions=True)
 
 
-class TestAutoPexEncounterStatusOutput(FrappeTestCase):
+class TestAutoPexEncounterStatusOutput(UnitTestCase):
 	def setUp(self):
+		super().setUp()
 		self.meta = _EncounterMetaStub()
 
 	def test_configured_status_is_set_on_new_encounter(self):
