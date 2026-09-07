@@ -1,6 +1,5 @@
 import frappe
 
-
 PRX_READY_STATUS = "PRX Ready"
 
 
@@ -24,6 +23,11 @@ def execute():
 		status.sr_status_name = PRX_READY_STATUS
 		status.is_active = 1
 		status.insert(ignore_permissions=True)
+
+	# An existing inactive status is an intentional configuration choice.
+	# Do not assign it to mappings or silently reactivate it.
+	if not frappe.db.get_value("SR Encounter Status", PRX_READY_STATUS, "is_active"):
+		return
 
 	for mapping_name in mappings:
 		frappe.db.set_value(

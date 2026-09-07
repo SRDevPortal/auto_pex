@@ -5,18 +5,17 @@ app_description = "Automated medication template and practitioner mapping for Pa
 app_email = "webdevelopersriaas@gmail.com"
 app_license = "mit"
 
-doc_events = {
-    "Patient Encounter": {
-        "before_save": [
-            "auto_pex.api.encounter_hooks.apply_auto_pex_mapping",
-        ],
-    },
-}
-
 # Apps
 # ------------------
+required_apps = ["erpnext", "healthcare", "sriaas_clinic"]
 
-# required_apps = []
+doc_events = {
+	"Patient Encounter": {
+		"before_save": [
+			"auto_pex.api.encounter_hooks.apply_auto_pex_mapping",
+		],
+	},
+}
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -246,4 +245,3 @@ doc_events = {
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
