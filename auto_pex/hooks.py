@@ -10,8 +10,16 @@ doc_events = {
         "before_save": [
             "auto_pex.api.encounter_hooks.apply_auto_pex_mapping",
         ],
+        "on_update": "auto_pex.ai.workflow.on_encounter_update",
     },
 }
+
+after_install = "auto_pex.ai.setup.setup"
+after_migrate = "auto_pex.ai.setup.setup"
+doctype_js = {"Patient Encounter": "public/js/ai_followup.js"}
+has_permission = {"Auto Pex AI Draft": "auto_pex.ai.workflow.draft_permission"}
+permission_query_conditions = {"Auto Pex AI Draft": "auto_pex.ai.workflow.draft_query"}
+scheduler_events = {"hourly": ["auto_pex.ai.workflow.expire_jobs"]}
 
 # Apps
 # ------------------
@@ -246,4 +254,3 @@ doc_events = {
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-

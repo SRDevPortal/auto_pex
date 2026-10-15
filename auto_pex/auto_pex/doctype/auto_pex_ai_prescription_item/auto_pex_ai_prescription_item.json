@@ -1,0 +1,87 @@
+{
+ "doctype": "DocType",
+ "name": "Auto Pex AI Prescription Item",
+ "module": "Auto Pex",
+ "engine": "InnoDB",
+ "field_order": [
+  "medication_class",
+  "medication",
+  "drug_code",
+  "dosage",
+  "period",
+  "dosage_form",
+  "instruction",
+  "rationale",
+  "source_ids"
+ ],
+ "fields": [
+  {
+   "fieldname": "medication_class",
+   "label": "Medication Class",
+   "fieldtype": "Select",
+   "options": "Ayurvedic Medicine\nHomeopathic Medicine\nAllopathic Medicine",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "medication",
+   "label": "Medication",
+   "fieldtype": "Link",
+   "options": "Medication",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "drug_code",
+   "label": "Drug Code",
+   "fieldtype": "Link",
+   "reqd": 1,
+   "options": "Item"
+  },
+  {
+   "fieldname": "dosage",
+   "label": "Dosage",
+   "fieldtype": "Link",
+   "options": "Prescription Dosage",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "period",
+   "label": "Period",
+   "fieldtype": "Link",
+   "options": "Prescription Duration",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "dosage_form",
+   "label": "Dosage Form",
+   "fieldtype": "Link",
+   "options": "Dosage Form",
+   "reqd": 1
+  },
+  {
+   "fieldname": "instruction",
+   "label": "Instructions",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "rationale",
+   "label": "Rationale for This Proposal",
+   "fieldtype": "Small Text",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_ids",
+   "label": "Source IDs (JSON array)",
+   "fieldtype": "Small Text",
+   "reqd": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "istable": 1,
+ "editable_grid": 1,
+ "permissions": []
+}

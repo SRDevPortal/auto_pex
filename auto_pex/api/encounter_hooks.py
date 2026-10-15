@@ -284,6 +284,12 @@ def apply_auto_pex_mapping(doc, method=None):
     template, drug prescription rows, practitioner, diet chart, and configured
     output encounter status.
     """
+    # Evaluate outside the legacy non-fatal catch: failure must not fall through and overwrite an AI prescription.
+    from auto_pex.ai.workflow import protects_prescription
+
+    if protects_prescription(doc):
+        return
+
     try:
         rows = doc.get(DRAFT_INVOICE_TABLE) or []
 

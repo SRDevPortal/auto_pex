@@ -1,0 +1,236 @@
+{
+ "doctype": "DocType",
+ "name": "Auto Pex AI Draft",
+ "module": "Auto Pex",
+ "engine": "InnoDB",
+ "field_order": [
+  "encounter",
+  "patient",
+  "status",
+  "requested_by",
+  "input_hash",
+  "settings_hash",
+  "context_hash",
+  "expected_status",
+  "input_snapshot",
+  "context_json",
+  "catalog_json",
+  "original_response",
+  "summary",
+  "warnings",
+  "instruction",
+  "items",
+  "review_notes",
+  "concerns_resolved",
+  "reviewed_by",
+  "reviewed_practitioner",
+  "reviewed_at",
+  "model",
+  "prompt_version",
+  "response_id",
+  "usage_json",
+  "failure_reason",
+  "review_html"
+ ],
+ "fields": [
+  {
+   "read_only": 1,
+   "fieldname": "encounter",
+   "label": "Patient Encounter",
+   "fieldtype": "Link",
+   "options": "Patient Encounter",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "patient",
+   "label": "Patient",
+   "fieldtype": "Link",
+   "options": "Patient",
+   "reqd": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "status",
+   "label": "Draft Status",
+   "fieldtype": "Select",
+   "options": "Queued\nGenerating\nReady\nNeeds Review\nFailed\nStale\nApproved\nRejected",
+   "default": "Queued",
+   "in_list_view": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "requested_by",
+   "label": "Requested By",
+   "fieldtype": "Link",
+   "options": "User"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "input_hash",
+   "label": "Encounter Input Hash",
+   "fieldtype": "Data"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "settings_hash",
+   "label": "Configuration Hash",
+   "fieldtype": "Data"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "context_hash",
+   "label": "History and Catalog Hash",
+   "fieldtype": "Data"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "expected_status",
+   "label": "Expected Encounter Status",
+   "fieldtype": "Link",
+   "options": "SR Encounter Status"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "input_snapshot",
+   "label": "Encounter Snapshot",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "hidden": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "context_json",
+   "label": "Clinical History Used",
+   "fieldtype": "Code",
+   "options": "JSON"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "catalog_json",
+   "label": "Medication Catalog Used",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "hidden": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "original_response",
+   "label": "Original AI Response",
+   "fieldtype": "Code",
+   "options": "JSON"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "summary",
+   "label": "Changes Since Previous Prescription",
+   "fieldtype": "Long Text"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "warnings",
+   "label": "Warnings and Missing Information",
+   "fieldtype": "Long Text"
+  },
+  {
+   "read_only": 0,
+   "fieldname": "instruction",
+   "label": "Prescription Instructions",
+   "fieldtype": "Small Text"
+  },
+  {
+   "read_only": 0,
+   "fieldname": "items",
+   "label": "Proposed Prescription",
+   "fieldtype": "Table",
+   "options": "Auto Pex AI Prescription Item"
+  },
+  {
+   "read_only": 0,
+   "fieldname": "review_notes",
+   "label": "Clinician Review Notes",
+   "fieldtype": "Small Text"
+  },
+  {
+   "read_only": 0,
+   "fieldname": "concerns_resolved",
+   "label": "I reviewed and resolved the listed concerns",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "reviewed_by",
+   "label": "Reviewed By",
+   "fieldtype": "Link",
+   "options": "User"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "reviewed_practitioner",
+   "label": "Reviewing Practitioner",
+   "fieldtype": "Link",
+   "options": "Healthcare Practitioner"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "reviewed_at",
+   "label": "Reviewed At",
+   "fieldtype": "Datetime"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "model",
+   "label": "Model",
+   "fieldtype": "Data"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "prompt_version",
+   "label": "Prompt Version",
+   "fieldtype": "Data"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "response_id",
+   "label": "OpenAI Response ID",
+   "fieldtype": "Data"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "usage_json",
+   "label": "Token Usage",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "hidden": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "failure_reason",
+   "label": "Generation Failure",
+   "fieldtype": "Small Text"
+  },
+  {
+   "read_only": 0,
+   "fieldname": "review_html",
+   "label": "Prescription Comparison",
+   "fieldtype": "HTML"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "autoname": "hash",
+ "track_changes": 1,
+ "permissions": [
+  {
+   "role": "Auto Pex AI Reviewer",
+   "read": 1,
+   "write": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1
+  }
+ ]
+}

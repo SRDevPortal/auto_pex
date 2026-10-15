@@ -1,0 +1,154 @@
+{
+ "doctype": "DocType",
+ "name": "Auto Pex AI Settings",
+ "module": "Auto Pex",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "auto_generate",
+  "automation_user",
+  "eligible_status",
+  "review_status",
+  "approved_status",
+  "model",
+  "openai_api_key",
+  "history_source",
+  "history_url",
+  "history_authorization",
+  "history_days",
+  "history_limit",
+  "request_timeout",
+  "retry_limit",
+  "max_medications",
+  "prescribing_constraints",
+  "additional_medications",
+  "medication_rules"
+ ],
+ "fields": [
+  {
+   "fieldname": "medication_rules",
+   "label": "Enforced Medication Rules",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "description": "Optional JSON object keyed by Medication ID, with allowed dosages, periods, drug_codes arrays and/or blocked boolean. Enforced on generation, editing and approval. See README."
+  },
+  {
+   "fieldname": "automation_user",
+   "label": "Automation User",
+   "fieldtype": "Link",
+   "options": "User",
+   "description": "Enabled reviewer with access to the encounters, patients and prescription catalogs. Background generation uses this user's permissions."
+  },
+  {
+   "fieldname": "additional_medications",
+   "label": "Additional Permitted Medications",
+   "fieldtype": "Small Text",
+   "description": "Optional exact Medication IDs, one per line. The AI catalog otherwise contains active medications from previous prescriptions."
+  },
+  {
+   "fieldname": "enabled",
+   "label": "Enable AI Follow-up Drafts",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "auto_generate",
+   "label": "Generate when ready encounter is saved",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "eligible_status",
+   "label": "Eligible Encounter Status",
+   "fieldtype": "Link",
+   "options": "SR Encounter Status"
+  },
+  {
+   "fieldname": "review_status",
+   "label": "Status after Draft Generation",
+   "fieldtype": "Link",
+   "options": "SR Encounter Status"
+  },
+  {
+   "fieldname": "approved_status",
+   "label": "Status after Clinician Approval",
+   "fieldtype": "Link",
+   "options": "SR Encounter Status"
+  },
+  {
+   "fieldname": "model",
+   "label": "OpenAI Model",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "openai_api_key",
+   "label": "OpenAI API Key",
+   "fieldtype": "Password"
+  },
+  {
+   "fieldname": "history_source",
+   "label": "History Source",
+   "fieldtype": "Select",
+   "options": "Local read-only API\nRemote read-only API",
+   "default": "Local read-only API"
+  },
+  {
+   "fieldname": "history_url",
+   "label": "Remote History GET Endpoint",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "history_authorization",
+   "label": "Remote Authorization Header",
+   "fieldtype": "Password",
+   "description": "Full Authorization value for a read-only service account, e.g. token key:secret. Sent only to the configured HTTPS endpoint."
+  },
+  {
+   "fieldname": "history_days",
+   "label": "History Lookback (days)",
+   "fieldtype": "Int",
+   "default": "365"
+  },
+  {
+   "fieldname": "history_limit",
+   "label": "Maximum History Encounters",
+   "fieldtype": "Int",
+   "default": "20"
+  },
+  {
+   "fieldname": "request_timeout",
+   "label": "Request Timeout (seconds)",
+   "fieldtype": "Int",
+   "default": "60"
+  },
+  {
+   "fieldname": "retry_limit",
+   "label": "Transient Request Retries",
+   "fieldtype": "Int",
+   "default": "1"
+  },
+  {
+   "fieldname": "max_medications",
+   "label": "Maximum Draft Medications",
+   "fieldtype": "Int",
+   "default": "20"
+  },
+  {
+   "fieldname": "prescribing_constraints",
+   "label": "Clinician-approved Prescribing Constraints",
+   "fieldtype": "Long Text",
+   "description": "Required before enabling. Guidance for the model, in addition to mandatory application checks; not a clinical interaction checker."
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "issingle": 1,
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ]
+}
