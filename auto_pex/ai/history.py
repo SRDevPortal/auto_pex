@@ -190,8 +190,8 @@ def medication_catalog(context, settings):
 	names.update(
 		line.strip() for line in (settings.get("additional_medications") or "").splitlines() if line.strip()
 	)
-	if len(names) > 100:
-		raise DraftError("The medication catalog exceeds 100 medications.")
+	if len(names) > 150:
+		raise DraftError("The medication catalog exceeds 150 medications.")
 	medications = []
 	for name in sorted(names):
 		doc = frappe.get_doc("Medication", name)

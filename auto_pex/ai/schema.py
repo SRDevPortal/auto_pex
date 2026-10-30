@@ -94,7 +94,6 @@ def encounter_snapshot(doc):
 		"sr_encounter_type",
 		"sr_encounter_place",
 		"sr_sales_type",
-		"auto_pex_notes_ready",
 		"submit_orders_on_save",
 		"sr_pe_instruction",
 		*NOTE_FIELDS,

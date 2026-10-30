@@ -2,12 +2,14 @@
 
 import json
 from contextlib import contextmanager
+from html import unescape
 
 import frappe
-from frappe.utils import add_to_date, now_datetime
+from frappe.utils import add_to_date, now_datetime, strip_html
 
 from auto_pex.ai import history, provider
 from auto_pex.ai.schema import (
+	NOTE_FIELDS,
 	PROMPT_VERSION,
 	TABLES,
 	DraftError,
@@ -85,10 +87,10 @@ def assert_eligible(doc, settings, expected_status=None):
 		raise DraftError("AI follow-up generation is disabled.")
 	if doc.get("submit_orders_on_save"):
 		raise DraftError("Turn off Submit Orders on Save before using the AI draft workflow.")
-	if doc.docstatus != 0 or not matches_route(doc) or not doc.get("auto_pex_notes_ready"):
-		raise DraftError(
-			"A draft Online / Order / Repeat encounter with clinical notes marked ready is required."
-		)
+	if doc.docstatus != 0 or not matches_route(doc):
+		raise DraftError("A draft Online / Order / Repeat encounter is required.")
+	if not any(unescape(strip_html(str(doc.get(field) or ""))).strip() for field in NOTE_FIELDS):
+		raise DraftError("Current clinical notes are required before AI generation.")
 	if doc.get("sr_encounter_status") != (expected_status or settings.eligible_status):
 		raise DraftError("The encounter is no longer in the expected workflow status.")
 
@@ -127,7 +129,10 @@ def on_encounter_update(doc, method=None):
 	if not settings.auto_generate or not settings.automation_user:
 		return
 	try:
-		assert_eligible(doc, settings)
+		expected = (
+			settings.review_status if doc.get("sr_encounter_status") == settings.review_status else None
+		)
+		assert_eligible(doc, settings, expected)
 	except DraftError:
 		return
 	# Run after commit; never do remote reads or change the initiating user's session inside save hooks.
@@ -163,9 +168,6 @@ def request_draft(encounter, regenerate=0):
 		raise DraftError("AI follow-up generation is disabled.")
 	doc = frappe.get_doc("Patient Encounter", encounter, for_update=True)
 	doc.check_permission("write")
-	# A failed/stale/rejected draft can be regenerated from the review state.
-	allowed_review = bool(int(regenerate)) and doc.get("sr_encounter_status") == settings.review_status
-	assert_eligible(doc, settings, settings.review_status if allowed_review else None)
 	previous = frappe.get_all(
 		DRAFT,
 		filters={"encounter": doc.name},
@@ -173,6 +175,9 @@ def request_draft(encounter, regenerate=0):
 		order_by="creation desc",
 		limit_page_length=1,
 	)
+	# Existing drafts may be replaced while the encounter is awaiting review.
+	allowed_review = bool(previous) and doc.get("sr_encounter_status") == settings.review_status
+	assert_eligible(doc, settings, settings.review_status if allowed_review else None)
 	input_hash = fingerprint(encounter_snapshot(doc))
 	if previous:
 		last = previous[0]

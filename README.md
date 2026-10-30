@@ -37,8 +37,8 @@ bench --site YOUR_SITE migrate
 ```
 
 Restart existing web and worker processes using your normal bench deployment process.
-The migration creates the `Auto Pex AI Reviewer` role and the
-`Clinical notes ready for AI` checkbox on Patient Encounter. AI is disabled by default.
+The migration creates the `Auto Pex AI Reviewer` role and hides the legacy
+`Clinical notes ready for AI` checkbox. AI is disabled by default.
 
 1. Open **Auto Pex AI Settings** as a System Manager.
 2. Select three distinct, active `SR Encounter Status` records: eligible, draft review,
@@ -53,6 +53,9 @@ The migration creates the `Auto Pex AI Reviewer` role and the
 5. Configure lookback, history count, timeout and retries. The medication catalog
    contains active medications from historical prescriptions. To permit additional
    medications, list exact Medication IDs in **Additional Permitted Medications**.
+   The deduplicated union of additional and historical medicines supports up to
+   150 entries. Larger catalogs fail explicitly rather than being truncated.
+   Read permissions and active, supported medication checks still apply.
 6. Optionally configure deterministic **Enforced Medication Rules**, for example:
 
    ```json
@@ -87,11 +90,17 @@ engine; a licensed clinician remains responsible for clinical suitability.
 
 #### Clinician workflow
 
-- Update the clinical notes and check **Clinical notes ready for AI**, then save.
+- Save an eligible encounter with clinical notes; no readiness checkbox is required.
 - Keep **Submit Orders on Save** off while using this draft workflow; encounters with
   that option enabled are ineligible to avoid creating medication requests during review.
 - Use **AI Follow-up > Generate AI Draft**, or let the configured automatic job run.
   Generation happens on the long queue; keep short and long workers running.
+- Once a usable draft is ready, the encounter moves to **Status before clinician approval**.
+  Approval applies **Status after Clinician Approval**; both statuses remain configurable.
+- Unchanged saves reuse the latest draft, including failed drafts (use **Regenerate** to retry).
+  Changed clinical inputs automatically replace unapproved drafts, including while awaiting
+  review. Old drafts remain **Stale** for audit and cannot be approved. Approved drafts
+  are never automatically replaced.
 - Open **View AI Drafts**. Use **Refresh Status** to see job completion. The draft
   shows previous prescriptions, current notes, proposed rows, source IDs and rationale.
 - Edit proposed rows and instructions if needed. Document resolution of any warnings

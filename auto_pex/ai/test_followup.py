@@ -192,6 +192,64 @@ class SchemaTests(Base):
 
 
 class HistoryTests(Base):
+	def test_catalog_limit_accepts_150_and_rejects_151_unique_medicines(self):
+		config = settings()
+		medicine = Doc(medication_class="Ayurvedic Medicine", check_permission=MagicMock())
+		# One historical medicine plus 149 additional medicines reaches the limit.
+		config.additional_medications = "\n".join(f"EXTRA-{i}" for i in range(149)) + "\nMED-1"
+		with (
+			patch.object(frappe, "get_doc", return_value=medicine),
+			patch.object(frappe, "get_list", return_value=[]),
+		):
+			self.assertEqual(len(history.medication_catalog(context(), config)["medications"]), 150)
+		config.additional_medications += "\nEXTRA-149"
+		with patch.object(frappe, "get_doc") as get_doc:
+			with self.assertRaisesRegex(DraftError, "exceeds 150 medications"):
+				history.medication_catalog(context(), config)
+			get_doc.assert_not_called()
+
+	def test_complete_catalog_includes_103_additional_and_historical_medications(self):
+		config = settings()
+		names = {f"ADDITIONAL-{i:03}" for i in range(103)}
+		config.additional_medications = "\n".join(sorted(names)) + "\nADDITIONAL-000\n\n"
+		clinical = context()
+		clinical["previous"][0]["prescriptions"].append({"medication": "ADDITIONAL-000"})
+		medicine = Doc(
+			medication_class="Ayurvedic Medicine",
+			strength=10,
+			strength_uom="mg",
+			dosage_form="FORM-1",
+			linked_items=[Doc(item="ITEM-1")],
+			check_permission=MagicMock(),
+		)
+		self.db.get_value.return_value = 0
+		with (
+			patch.object(frappe, "get_doc", return_value=medicine) as get_doc,
+			patch.object(frappe, "get_list", return_value=[]),
+		):
+			result = history.medication_catalog(clinical, config)
+		self.assertEqual([row["medication"] for row in result["medications"]], sorted(names | {"MED-1"}))
+		self.assertEqual(get_doc.call_count, 104)
+		self.assertEqual(medicine.check_permission.call_count, 104)
+		self.assertTrue(all(row["drug_codes"] == ["ITEM-1"] for row in result["medications"]))
+
+	def test_catalog_still_excludes_disabled_and_unsupported_medicines(self):
+		config = settings()
+		config.additional_medications = "DISABLED\nUNSUPPORTED"
+		docs = {
+			"DISABLED": Doc(disabled=1, check_permission=MagicMock()),
+			"UNSUPPORTED": Doc(medication_class="Unsupported", check_permission=MagicMock()),
+			"MED-1": Doc(medication_class="Ayurvedic Medicine", check_permission=MagicMock()),
+		}
+		with (
+			patch.object(frappe, "get_doc", side_effect=lambda doctype, name: docs[name]),
+			patch.object(frappe, "get_list", return_value=[]),
+		):
+			result = history.medication_catalog(context(), config)
+		self.assertEqual([row["medication"] for row in result["medications"]], ["MED-1"])
+		for doc in docs.values():
+			doc.check_permission.assert_called_once_with("read")
+
 	def test_enforced_medication_rules_block_dose_duration_and_medication(self):
 		for rule in ({"blocked": True}, {"dosages": []}, {"periods": ["OTHER"]}, {"drug_codes": ["OTHER"]}):
 			value = catalog()
@@ -471,11 +529,12 @@ class WorkflowTests(Base):
 		with patch.object(workflow, "_review_document", return_value=draft), self.assertRaises(DraftError):
 			workflow.approve_draft("DRAFT", "v1")
 
-	def test_ready_checkbox_and_status_required(self):
+	def test_notes_and_status_required_without_checkbox(self):
 		doc = encounter()
+		doc.auto_pex_notes_ready = 0
 		workflow.assert_eligible(doc, settings())
 		for field, value in (
-			("auto_pex_notes_ready", 0),
+			("sr_notes", "<p>&nbsp;</p>"),
 			("docstatus", 1),
 			("sr_encounter_status", "Approved"),
 		):
@@ -525,6 +584,91 @@ class WorkflowTests(Base):
 		):
 			self.assertEqual(workflow.request_draft("CURRENT", regenerate=1), "EXISTING")
 		enqueue.assert_not_called()
+
+	def test_unchanged_review_drafts_are_reused_without_retry(self):
+		for status in ("Ready", "Needs Review", "Generating", "Failed", "Rejected"):
+			with self.subTest(status=status):
+				doc = encounter()
+				doc.sr_encounter_status = "AI Review"
+				last = frappe._dict(
+					name="OLD", status=status, input_hash=fingerprint(encounter_snapshot(doc))
+				)
+				with (
+					patch.object(workflow, "check_reviewer"),
+					patch.object(workflow, "get_settings", return_value=settings()),
+					patch.object(frappe, "get_doc", return_value=doc),
+					patch.object(frappe, "get_all", return_value=[last]),
+					patch.object(frappe, "enqueue") as enqueue,
+				):
+					self.assertEqual(workflow.request_draft("CURRENT"), "OLD")
+					enqueue.assert_not_called()
+
+	def test_changed_review_draft_creates_replacement(self):
+		doc = encounter()
+		doc.sr_encounter_status = "AI Review"
+		old = Doc(name="OLD", status="Ready", save=MagicMock())
+		new = MagicMock()
+		new.insert.return_value.name = "NEW"
+		with (
+			patch.object(workflow, "check_reviewer"),
+			patch.object(workflow, "get_settings", return_value=settings()),
+			patch.object(frappe, "get_doc", side_effect=[doc, old, new]),
+			patch.object(
+				frappe,
+				"get_all",
+				return_value=[frappe._dict(name="OLD", status="Ready", input_hash="outdated")],
+			),
+			patch.object(frappe, "enqueue") as enqueue,
+		):
+			self.assertEqual(workflow.request_draft("CURRENT"), "NEW")
+			self.assertEqual(old.status, "Stale")
+			old.save.assert_called_once()
+			self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
+
+	def test_save_invalidates_old_draft_and_queues_in_review_status(self):
+		for status in ("Generating", "Ready"):
+			with self.subTest(status=status):
+				doc = encounter()
+				doc.auto_pex_notes_ready = 0
+				doc.sr_encounter_status = "AI Review"
+				config = settings()
+				config.auto_generate, config.automation_user = 1, "reviewer"
+				old = Doc(status=status, save=MagicMock())
+				with (
+					patch.object(workflow, "get_settings", return_value=config),
+					patch.object(
+						frappe,
+						"get_all",
+						return_value=[
+							frappe._dict(name="OLD", input_hash="old", expected_status="AI Review")
+						],
+					),
+					patch.object(frappe, "get_doc", return_value=old),
+					patch.object(frappe, "enqueue") as enqueue,
+				):
+					workflow.on_encounter_update(doc)
+					self.assertEqual(old.status, "Stale")
+					self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
+
+	def test_automatic_save_requires_notes_and_eligible_status(self):
+		for notes, status, should_queue in (
+			("Clinical update", "Draft", True),
+			("", "Draft", False),
+			("Clinical update", "Approved", False),
+		):
+			with self.subTest(notes=notes, status=status):
+				doc = encounter()
+				doc.auto_pex_notes_ready = 0
+				doc.sr_notes, doc.sr_encounter_status = notes, status
+				config = settings()
+				config.auto_generate, config.automation_user = 1, "reviewer"
+				with (
+					patch.object(workflow, "get_settings", return_value=config),
+					patch.object(frappe, "get_all", return_value=[]),
+					patch.object(frappe, "enqueue") as enqueue,
+				):
+					workflow.on_encounter_update(doc)
+					self.assertEqual(enqueue.called, should_queue)
 
 	def test_approved_encounter_not_regenerated(self):
 		with (

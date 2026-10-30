@@ -17,10 +17,11 @@ def setup():
 						"fieldtype": "Check",
 						"default": "0",
 						"no_copy": 1,
+						"hidden": 1,
 						"insert_after": "sr_notes",
 						"module": "Auto Pex",
 						"depends_on": 'eval:doc.sr_encounter_type=="Order" && doc.sr_encounter_place=="Online" && doc.sr_sales_type=="Repeat"',
-						"description": "Mark after reviewing the updated clinical notes. AI drafts require clinician approval.",
+						"description": "Legacy field; AI drafts are generated automatically from eligible saved clinical notes.",
 					}
 				]
 			}
