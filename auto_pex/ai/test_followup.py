@@ -28,6 +28,8 @@ def proposal():
 				"dosage": "DOSAGE-1",
 				"period": "PERIOD-1",
 				"dosage_form": "FORM-1",
+				"dispensing_quantity": 30,
+				"dispensing_uom": "Nos",
 				"instruction": "Instructions",
 				"rationale": "Based on documented follow-up",
 				"source_ids": ["PREV-1"],
@@ -51,6 +53,7 @@ def catalog():
 		"dosages": ["DOSAGE-1"],
 		"periods": ["PERIOD-1"],
 		"dosage_forms": ["FORM-1"],
+		"dispensing_uoms": ["Nos", "ml"],
 	}
 
 
@@ -68,6 +71,7 @@ def context():
 		"patient_id": "PATIENT-1",
 		"encounter_id": "CURRENT",
 		"truncated": False,
+		"investigations": [],
 		"patient_history": {"modified": "2026-09-01", "allergies": "Unknown", "age_years": 30},
 		"current": source,
 		"previous": [{**source, "id": "PREV-1", "docstatus": 1, "prescriptions": proposal()["items"]}],
@@ -115,6 +119,7 @@ def settings():
 		retry_limit=1,
 		max_medications=20,
 		prescribing_constraints="Clinician rules",
+		medicine_catalog="medication_id,formulation\nMED-1,Synthetic test formulation\n",
 		get_password=MagicMock(return_value="test-secret"),
 	)
 
@@ -194,7 +199,7 @@ class SchemaTests(Base):
 class HistoryTests(Base):
 	def test_catalog_limit_accepts_150_and_rejects_151_unique_medicines(self):
 		config = settings()
-		medicine = Doc(medication_class="Ayurvedic Medicine", check_permission=MagicMock())
+		medicine = Doc(name="MED-1", medication_class="Ayurvedic Medicine", check_permission=MagicMock())
 		# One historical medicine plus 149 additional medicines reaches the limit.
 		config.additional_medications = "\n".join(f"EXTRA-{i}" for i in range(149)) + "\nMED-1"
 		with (
@@ -215,6 +220,7 @@ class HistoryTests(Base):
 		clinical = context()
 		clinical["previous"][0]["prescriptions"].append({"medication": "ADDITIONAL-000"})
 		medicine = Doc(
+			name="MED-1",
 			medication_class="Ayurvedic Medicine",
 			strength=10,
 			strength_uom="mg",
@@ -239,7 +245,7 @@ class HistoryTests(Base):
 		docs = {
 			"DISABLED": Doc(disabled=1, check_permission=MagicMock()),
 			"UNSUPPORTED": Doc(medication_class="Unsupported", check_permission=MagicMock()),
-			"MED-1": Doc(medication_class="Ayurvedic Medicine", check_permission=MagicMock()),
+			"MED-1": Doc(name="MED-1", medication_class="Ayurvedic Medicine", check_permission=MagicMock()),
 		}
 		with (
 			patch.object(frappe, "get_doc", side_effect=lambda doctype, name: docs[name]),
@@ -305,7 +311,10 @@ class HistoryTests(Base):
 	def test_remote_history_is_get_only_and_identity_checked(self):
 		config = settings()
 		config.history_url, config.history_days, config.history_limit = "https://history.example/api", 365, 20
-		with patch.object(history, "request_json", return_value={"message": context()}) as request:
+		with (
+			patch.object(history, "request_json", return_value={"message": context()}) as request,
+			patch("auto_pex.ai.reports.manifest", return_value=[]),
+		):
 			history.fetch_history(encounter(), config)
 		self.assertEqual(request.call_args.args[0], "GET")
 		self.assertEqual(request.call_args.kwargs["params"]["encounter"], "CURRENT")
@@ -393,6 +402,10 @@ class WorkflowTests(Base):
 		self.assertEqual(doc.sr_encounter_status, "AI Review")
 		self.assertEqual(draft.expected_status, "AI Review")
 		self.assertEqual(draft.items[0]["medication"], "MED-1")
+		self.assertEqual(json.loads(draft.configuration_json)["medicine_catalog"], config.medicine_catalog)
+		self.assertEqual(
+			json.loads(draft.configuration_json)["instructions_sent"], provider.instructions_for(config)
+		)
 		self.assertIsNone(doc.get("drug_prescription"))
 
 	def test_generation_marks_changed_remote_notes_stale(self):
@@ -448,6 +461,10 @@ class WorkflowTests(Base):
 
 	def test_approval_applies_rows_and_status_once_with_audit(self):
 		doc, config, clinical, draft = self.make_review()
+		# Clinician edits must survive application; quantity is independent of dosage.
+		draft.items[0].dispensing_quantity = 42.5
+		draft.items[0].dispensing_uom = "ml"
+		draft.items[0].instruction = "Clinician-edited free text"
 		self.db.get_value.return_value = "PRACTITIONER-1"
 		with (
 			patch.object(workflow, "_review_document", return_value=draft),
@@ -467,6 +484,11 @@ class WorkflowTests(Base):
 		self.assertEqual(doc.sr_encounter_status, "Approved")
 		self.assertEqual(doc.drug_prescription[0]["medication"], "MED-1")
 		self.assertEqual(doc.drug_prescription[0]["strength"], 10)
+		self.assertEqual(doc.drug_prescription[0]["auto_pex_dispensing_quantity"], 42.5)
+		self.assertEqual(doc.drug_prescription[0]["auto_pex_dispensing_uom"], "ml")
+		self.assertEqual(doc.drug_prescription[0]["dosage"], "DOSAGE-1")
+		self.assertEqual(doc.drug_prescription[0]["comment"], "Clinician-edited free text")
+		self.assertNotIn("sr_drug_instruction", doc.drug_prescription[0])
 		self.assertEqual(doc.sr_homeopathy_drug_prescription, [])
 		self.assertEqual(draft.reviewed_by, "reviewer")
 		self.assertEqual(draft.reviewed_practitioner, "PRACTITIONER-1")
@@ -573,7 +595,10 @@ class WorkflowTests(Base):
 	def test_duplicate_generation_reuses_pending_draft(self):
 		doc = encounter()
 		last = frappe._dict(
-			name="EXISTING", status="Generating", input_hash=fingerprint(encounter_snapshot(doc))
+			name="EXISTING",
+			status="Generating",
+			input_hash=fingerprint(encounter_snapshot(doc)),
+			settings_hash=workflow.config_hash(settings()),
 		)
 		with (
 			patch.object(workflow, "check_reviewer"),
@@ -591,13 +616,19 @@ class WorkflowTests(Base):
 				doc = encounter()
 				doc.sr_encounter_status = "AI Review"
 				last = frappe._dict(
-					name="OLD", status=status, input_hash=fingerprint(encounter_snapshot(doc))
+					name="OLD",
+					status=status,
+					input_hash=fingerprint(encounter_snapshot(doc)),
+					settings_hash=workflow.config_hash(settings()),
+					context_hash=workflow.context_hash(context(), catalog()),
 				)
 				with (
 					patch.object(workflow, "check_reviewer"),
 					patch.object(workflow, "get_settings", return_value=settings()),
 					patch.object(frappe, "get_doc", return_value=doc),
 					patch.object(frappe, "get_all", return_value=[last]),
+					patch.object(history, "fetch_history", return_value=context()),
+					patch.object(history, "medication_catalog", return_value=catalog()),
 					patch.object(frappe, "enqueue") as enqueue,
 				):
 					self.assertEqual(workflow.request_draft("CURRENT"), "OLD")

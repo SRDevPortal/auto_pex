@@ -73,12 +73,15 @@ function render_comparison(frm) {
 					row.dosage_form
 				)}</td>
         <td>${escape(row.dosage)}</td><td>${escape(row.period)}</td>
+		<td>${escape(row.dispensing_quantity ?? row.auto_pex_dispensing_quantity)} ${escape(
+					row.dispensing_uom ?? row.auto_pex_dispensing_uom
+				)}</td>
         <td>${escape(row.instruction || row.sr_drug_instruction || row.comment)}</td>
         </tr>`
 			)
 			.join("");
 	const table = (items) => `<div class="table-responsive"><table class="table table-bordered">
-        <thead><tr><th>Class</th><th>Medication</th><th>Strength</th><th>Form</th><th>Dosage</th><th>Duration</th><th>Instructions</th></tr></thead>
+        <thead><tr><th>Class</th><th>Medication</th><th>Strength</th><th>Form</th><th>Dosage / frequency</th><th>Duration</th><th>Dispensing quantity / unit</th><th>Instructions</th></tr></thead>
         <tbody>${rows(items)}</tbody></table></div>`;
 	const previous = (context.previous || [])
 		.slice()
@@ -113,8 +116,85 @@ function render_comparison(frm) {
 		),
 		...row,
 	}));
+	const resultValue = (value) => {
+		if (Array.isArray(value)) {
+			return value
+				.map(
+					(row) =>
+						`<p>${Object.entries(row)
+							.filter(([, item]) => item !== "" && item != null)
+							.map(
+								([key, item]) =>
+									`<strong>${escape(
+										key.replaceAll("_", " ")
+									)}:</strong> ${escape(item)}`
+							)
+							.join("; ")}</p>`
+				)
+				.join("");
+		}
+		return escape(value);
+	};
+	const investigations = (context.investigations || [])
+		.map((source) => {
+			const details = Object.entries(source.details || {})
+				.filter(
+					([, value]) =>
+						value !== "" && value != null && (!Array.isArray(value) || value.length)
+				)
+				.map(
+					([key, value]) =>
+						`<div><strong>${escape(key.replaceAll("_", " "))}</strong>: ${resultValue(
+							value
+						)}</div>`
+				)
+				.join("");
+			return `<details><summary>${escape(source.date)} — ${escape(source.id)} (${escape(
+				source.status
+			)})</summary>${details}</details>`;
+		})
+		.join("");
+	const reports = (context.attached_reports || [])
+		.map((source) => {
+			const extraction = (context.report_extractions || []).find(
+				(item) => item.id === source.id
+			);
+			const pages = extraction?.result?.pages;
+			const text = Array.isArray(pages)
+				? pages
+						.map(
+							(page) => `<p><strong>Page ${escape(page?.page)} ? ${
+								page?.readable === true ? "Read" : "Unreadable / incomplete"
+							}</strong></p>
+			<pre style="white-space:pre-wrap">${escape(page?.text)}</pre>
+			<p>${escape(Array.isArray(page?.uncertainties) ? page.uncertainties.join("; ") : "")}</p>`
+						)
+						.join("")
+				: "Not read yet.";
+			return `<details><summary>${escape(source.filename)} ? ${escape(source.id)} (${escape(
+				source.pages
+			)} pages)</summary>
+			<p>${escape(
+				(source.references || []).map((ref) => ref.encounter).join(", ")
+			)}</p>${text}</details>`;
+		})
+		.join("");
 	frm.fields_dict.review_html.$wrapper.html(`<h4>Medical history</h4>${patientHistory}
         <h4>Current clinical notes</h4>${notes}
         <h4>Previous prescriptions</h4>${previous || "No history available yet."}
+		<h4>Laboratory tests and results</h4>${
+			investigations || "No laboratory records in the supplied history."
+		}
+		${
+			context.investigations_truncated
+				? "<p>Laboratory history was limited; review completeness.</p>"
+				: ""
+		}
+        <h4>Attached reports</h4>${reports || "No attached reports in the selected encounters."}
+        ${
+			context.attached_reports?.length
+				? "<p>Check extracted values, units, dates and patient identity against the originals before approval.</p>"
+				: ""
+		}
         <h4>Proposed prescription</h4>${table(proposed)}`);
 }

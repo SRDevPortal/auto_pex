@@ -15,6 +15,7 @@
   "input_snapshot",
   "context_json",
   "catalog_json",
+  "configuration_json",
   "original_response",
   "summary",
   "warnings",
@@ -216,6 +217,13 @@
    "fieldname": "review_html",
    "label": "Prescription Comparison",
    "fieldtype": "HTML"
+  },
+  {
+   "fieldname": "configuration_json",
+   "label": "Configuration Used",
+   "fieldtype": "Long Text",
+   "read_only": 1,
+   "hidden": 1
   }
  ],
  "sort_field": "modified",

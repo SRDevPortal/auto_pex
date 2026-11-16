@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 
 import frappe
 from jsonschema import Draft202012Validator
@@ -25,8 +26,10 @@ RX_FIELDS = (
 	"interval_uom",
 	"sr_drug_instruction",
 	"comment",
+	"auto_pex_dispensing_quantity",
+	"auto_pex_dispensing_uom",
 )
-PROMPT_VERSION = "followup-v2-current-order-instructions"
+PROMPT_VERSION = "followup-v5-encounter-reports"
 
 
 def object_schema(properties):
@@ -48,6 +51,8 @@ ITEM_SCHEMA = object_schema(
 		"dosage": TEXT,
 		"period": TEXT,
 		"dosage_form": TEXT,
+		"dispensing_quantity": {"type": "number"},
+		"dispensing_uom": TEXT,
 		"instruction": TEXT,
 		"rationale": TEXT,
 		"source_ids": TEXT_LIST,
@@ -87,6 +92,8 @@ def matches_route(encounter):
 
 
 def encounter_snapshot(doc):
+	from auto_pex.ai.reports import _attachment_refs
+
 	fields = (
 		"patient",
 		"company",
@@ -99,6 +106,7 @@ def encounter_snapshot(doc):
 		*NOTE_FIELDS,
 	)
 	result = {field: doc.get(field) for field in fields}
+	result["attachment_fields"] = _attachment_refs(doc)
 	result["order_items"] = [
 		{
 			key: row.get(key)
@@ -121,9 +129,23 @@ def validate_proposal(proposal, source_ids, max_items=20):
 		raise DraftError("An unable-to-draft response must not contain medication rows.")
 	seen = set()
 	for row in items:
+		if (
+			not math.isfinite(row["dispensing_quantity"])
+			or isinstance(row["dispensing_quantity"], bool)
+			or row["dispensing_quantity"] <= 0
+		):
+			raise DraftError("Dispensing quantity must be a finite positive number.")
 		if any(
 			not row[key].strip()
-			for key in ("medication", "drug_code", "dosage", "period", "dosage_form", "rationale")
+			for key in (
+				"medication",
+				"drug_code",
+				"dosage",
+				"period",
+				"dosage_form",
+				"dispensing_uom",
+				"rationale",
+			)
 		):
 			raise DraftError("A medication row is missing a required value.")
 		key = row["medication"].strip().casefold()

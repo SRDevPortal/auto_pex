@@ -5,6 +5,8 @@ import json
 import frappe
 from frappe.utils import add_days, getdate
 
+from auto_pex.ai import investigations
+from auto_pex.ai.pasted_catalog import additional_ids, validate_mapping, validate_settings_content
 from auto_pex.ai.provider import request_json, validate_url
 from auto_pex.ai.schema import NOTE_FIELDS, RX_FIELDS, TABLES, DraftError
 
@@ -62,6 +64,7 @@ def get_history(encounter, history_days=365, history_limit=20):
 	age = None
 	if patient.get("dob"):
 		age = round((getdate(doc.encounter_date) - getdate(patient.dob)).days / 365.25, 2)
+	lab_sources, lab_truncated = investigations.fetch(doc, days, limit)
 	return {
 		"patient_id": doc.patient,
 		"encounter_id": doc.name,
@@ -73,11 +76,13 @@ def get_history(encounter, history_days=365, history_limit=20):
 		},
 		"current": _clinical_source(doc),
 		"previous": records,
-		"truncated": len(names) > limit,
+		"investigations": lab_sources,
+		"investigations_truncated": lab_truncated,
+		"truncated": len(names) > limit or lab_truncated,
 	}
 
 
-def normalize_history(data, encounter):
+def normalize_history(data, encounter, history_days=None, history_limit=None):
 	"""Whitelist clinical keys so arbitrary API fields are never forwarded to OpenAI."""
 	try:
 		if data["patient_id"] != encounter.patient or data["encounter_id"] != encounter.name:
@@ -124,8 +129,27 @@ def normalize_history(data, encounter):
 			)
 		if current["id"] != encounter.name or "patient-history" in ids:
 			raise ValueError
+		ids.add("patient-history")
+		if "investigations" not in data:
+			raise DraftError(
+				"The history API must return investigations (an empty array if none). Update the remote history adapter."
+			)
+		lab_sources, lab_truncated = investigations.normalize(
+			data["investigations"], encounter, history_days, history_limit, ids
+		)
 		if not patient.get("modified"):
 			raise ValueError
+		previous_records = sorted(normalized[1:], key=lambda s: (s["date"], s["id"]), reverse=True)
+		lab_truncated = lab_truncated or bool(data.get("investigations_truncated"))
+		truncated = bool(data.get("truncated")) or lab_truncated
+		if history_days is not None:
+			cutoff = getdate(add_days(encounter.encounter_date, -int(history_days)))
+			within_window = [source for source in previous_records if getdate(source["date"]) >= cutoff]
+			truncated = truncated or len(within_window) != len(previous_records)
+			previous_records = within_window
+		if history_limit is not None:
+			truncated = truncated or len(previous_records) > int(history_limit)
+			previous_records = previous_records[: int(history_limit)]
 		result = {
 			"patient_history": {
 				"id": "patient-history",
@@ -134,8 +158,15 @@ def normalize_history(data, encounter):
 				**{key: str(patient.get(key) or "") for key in PATIENT_FIELDS},
 			},
 			"current": normalized[0],
-			"previous": sorted(normalized[1:], key=lambda s: (s["date"], s["id"])),
-			"truncated": bool(data.get("truncated")),
+			"previous": list(reversed(previous_records)),
+			"investigations": lab_sources,
+			"investigations_truncated": lab_truncated,
+			"truncated": truncated,
+			"history_scope": {
+				"days": history_days,
+				"encounter_limit": history_limit,
+				"investigation_limit": history_limit,
+			},
 		}
 		if not any(result["current"]["notes"].values()):
 			raise DraftError("Current clinical notes are required before AI generation.")
@@ -173,34 +204,60 @@ def fetch_history(encounter, settings):
 	else:
 		# The same permission-checked GET handler, without a loopback HTTP request or extra credentials.
 		data = get_history(encounter.name, settings.history_days, settings.history_limit)
-	return normalize_history(data, encounter)
+	context = normalize_history(data, encounter, settings.history_days, settings.history_limit)
+	from auto_pex.ai import reports
+
+	context["investigation_source"] = settings.history_source
+	local = settings.history_source == "Local read-only API"
+	context["report_scope"] = "current-and-history" if local else "current-local-only"
+	context["attached_reports"] = reports.manifest(encounter, context, local_history=local)
+	return context
 
 
 def source_ids(context):
-	return {"patient-history", context["current"]["id"], *(row["id"] for row in context["previous"])}
+	return {
+		"patient-history",
+		context["current"]["id"],
+		*(row["id"] for row in context["previous"]),
+		*(row["id"] for row in context.get("investigations", [])),
+		*(row["id"] for row in context.get("attached_reports", [])),
+	}
 
 
 def medication_catalog(context, settings):
+	pasted = validate_settings_content(settings)
+	mapped = {row["medication_id"]: row for row in pasted}
 	names = {
 		row["medication"]
 		for source in context["previous"]
 		for row in source["prescriptions"]
 		if row.get("medication")
 	}
-	names.update(
-		line.strip() for line in (settings.get("additional_medications") or "").splitlines() if line.strip()
-	)
+	names.update(additional_ids(settings))
+	names.update(mapped)
 	if len(names) > 150:
 		raise DraftError("The medication catalog exceeds 150 medications.")
+	identifiers = {name.casefold(): name for name in names}
+	for row in pasted:
+		code = row.get("code", "").casefold()
+		if code in identifiers and identifiers[code] != row["medication_id"]:
+			raise DraftError("A pasted code conflicts with another permitted ERP Medication ID.")
 	medications = []
 	for name in sorted(names):
-		doc = frappe.get_doc("Medication", name)
-		doc.check_permission("read")
+		try:
+			doc = validate_mapping(mapped[name]) if name in mapped else frappe.get_doc("Medication", name)
+		except frappe.DoesNotExistError:
+			raise DraftError(
+				"A permitted medication does not exist. Check exact ERP Medication IDs."
+			) from None
+		if name not in mapped:
+			doc.check_permission("read")
 		if doc.get("disabled") or doc.get("medication_class") not in TABLES:
 			continue
 		medications.append(
 			{
 				"medication": name,
+				"pasted_knowledge": mapped.get(name),
 				"medication_class": doc.medication_class,
 				"strength": doc.get("strength"),
 				"strength_uom": doc.get("strength_uom"),
@@ -221,6 +278,7 @@ def medication_catalog(context, settings):
 		("dosages", "Prescription Dosage"),
 		("periods", "Prescription Duration"),
 		("dosage_forms", "Dosage Form"),
+		("dispensing_uoms", "UOM"),
 	):
 		values = frappe.get_list(doctype, pluck="name", order_by="name", limit_page_length=501)
 		if len(values) > 500:
@@ -258,12 +316,18 @@ def validate_catalog(proposal, catalog):
 		if row["drug_code"] and row["drug_code"] not in medicine["drug_codes"]:
 			raise DraftError("A drug code does not belong to its medication or is disabled.")
 		if (
-			row["dosage"] not in catalog["dosages"]
+			row["dispensing_uom"] not in catalog.get("dispensing_uoms", [])
+			or row["dosage"] not in catalog["dosages"]
 			or row["period"] not in catalog["periods"]
 			or row["dosage_form"] not in catalog["dosage_forms"]
 			or (medicine["dosage_form"] and row["dosage_form"] != medicine["dosage_form"])
 		):
-			raise DraftError("A dosage, duration or dosage form is not valid for this medication.")
+			raise DraftError(
+				"A dosage, duration, dosage form or dispensing unit is not valid for this medication."
+			)
+		mapping = medicine.get("pasted_knowledge") or {}
+		if mapping.get("drug_code") and row["drug_code"] != mapping["drug_code"]:
+			raise DraftError("The drug code differs from the explicit pasted catalog mapping.")
 		rule = catalog.get("rules", {}).get(row["medication"], {})
 		if rule.get("blocked") or any(
 			row[field] not in rule[allowed]

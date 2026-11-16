@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 auto_pex.patches.set_existing_item_mappings_active
 auto_pex.patches.set_existing_mapping_encounter_status
+auto_pex.patches.disable_auto_generation_for_catalog_setup

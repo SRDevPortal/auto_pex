@@ -3,6 +3,29 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
 def setup():
+	if frappe.db.exists("DocType", "Drug Prescription"):
+		create_custom_fields(
+			{
+				"Drug Prescription": [
+					{
+						"fieldname": "auto_pex_dispensing_quantity",
+						"label": "Dispensing Quantity",
+						"fieldtype": "Float",
+						"insert_after": "period",
+						"module": "Auto Pex",
+						"description": "Total quantity to supply; separate from the dosage/frequency schedule.",
+					},
+					{
+						"fieldname": "auto_pex_dispensing_uom",
+						"label": "Dispensing Unit",
+						"fieldtype": "Link",
+						"options": "UOM",
+						"insert_after": "auto_pex_dispensing_quantity",
+						"module": "Auto Pex",
+					},
+				]
+			}
+		)
 	if not frappe.db.exists("Role", "Auto Pex AI Reviewer"):
 		frappe.get_doc({"doctype": "Role", "role_name": "Auto Pex AI Reviewer", "desk_access": 1}).insert(
 			ignore_permissions=True

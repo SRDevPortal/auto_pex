@@ -3,12 +3,18 @@ import json
 import frappe
 from frappe.model.document import Document
 
+from auto_pex.ai.pasted_catalog import additional_ids, validate_mapping, validate_settings_content
 from auto_pex.ai.provider import validate_url
 from auto_pex.ai.schema import DraftError
 
 
 class AutoPexAISettings(Document):
 	def validate(self):
+		rows = validate_settings_content(self, require_content=bool(self.enabled))
+		for row in rows:
+			validate_mapping(row)
+		for name in additional_ids(self):
+			validate_mapping({"medication_id": name})
 		try:
 			rules = json.loads(self.medication_rules or "{}")
 			if not isinstance(rules, dict):

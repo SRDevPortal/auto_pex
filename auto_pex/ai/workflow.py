@@ -7,7 +7,8 @@ from html import unescape
 import frappe
 from frappe.utils import add_to_date, now_datetime, strip_html
 
-from auto_pex.ai import history, provider
+from auto_pex.ai import history, investigations, provider, reports
+from auto_pex.ai.pasted_catalog import audit_configuration, validate_settings_content
 from auto_pex.ai.schema import (
 	NOTE_FIELDS,
 	PROMPT_VERSION,
@@ -23,6 +24,8 @@ DRAFT = "Auto Pex AI Draft"
 SETTINGS = "Auto Pex AI Settings"
 ROLE = "Auto Pex AI Reviewer"
 EDITABLE = {"instruction", "items", "review_notes", "concerns_resolved"}
+# Up to 20 report reads, one draft and three history requests, each with bounded retries.
+GENERATION_TIMEOUT = 3 * 60 * 60
 
 
 @contextmanager
@@ -59,6 +62,7 @@ def config_hash(settings):
 					"history_days",
 					"history_limit",
 					"prescribing_constraints",
+					"medicine_catalog",
 					"max_medications",
 					"additional_medications",
 					"medication_rules",
@@ -71,6 +75,7 @@ def config_hash(settings):
 def context_hash(context, catalog):
 	# Our own review-status save changes modified/status, but not clinical content.
 	clinical = json.loads(json.dumps(context, default=str))
+	clinical.pop("report_extractions", None)
 	clinical["current"].pop("modified", None)
 	clinical["current"].pop("status", None)
 	return fingerprint({"history": clinical, "catalog": catalog})
@@ -166,12 +171,13 @@ def request_draft(encounter, regenerate=0):
 	settings = get_settings()
 	if not settings or not settings.enabled:
 		raise DraftError("AI follow-up generation is disabled.")
+	validate_settings_content(settings, require_content=True)
 	doc = frappe.get_doc("Patient Encounter", encounter, for_update=True)
 	doc.check_permission("write")
 	previous = frappe.get_all(
 		DRAFT,
 		filters={"encounter": doc.name},
-		fields=["name", "status", "input_hash"],
+		fields=["name", "status", "input_hash", "settings_hash", "context_hash"],
 		order_by="creation desc",
 		limit_page_length=1,
 	)
@@ -185,10 +191,18 @@ def request_draft(encounter, regenerate=0):
 			raise DraftError(
 				"This encounter already has an approved AI prescription. Use a new follow-up encounter."
 			)
-		if last.status in ("Queued", "Generating") and last.input_hash == input_hash:
+		same_inputs = last.input_hash == input_hash and last.settings_hash == config_hash(settings)
+		# A queued job has not consumed history yet. Generating jobs recheck their sources on completion.
+		if last.status in ("Queued", "Generating") and same_inputs:
 			return last.name
-		if not int(regenerate) and last.input_hash == input_hash:
-			return last.name
+		if not int(regenerate) and same_inputs and last.status != "Stale":
+			if last.context_hash:
+				context = history.fetch_history(doc, settings)
+				catalog = history.medication_catalog(context, settings)
+				if last.context_hash == context_hash(context, catalog):
+					return last.name
+			elif last.status in ("Failed", "Rejected"):
+				return last.name
 		if last.status in ("Ready", "Needs Review", "Queued", "Generating"):
 			with service_write():
 				old = frappe.get_doc(DRAFT, last.name)
@@ -214,7 +228,7 @@ def request_draft(encounter, regenerate=0):
 		"auto_pex.ai.workflow.generate_draft",
 		draft_name=draft.name,
 		queue="long",
-		timeout=1800,
+		timeout=GENERATION_TIMEOUT,
 		enqueue_after_commit=True,
 		job_id="auto-pex-" + draft.name,
 		deduplicate=True,
@@ -242,7 +256,9 @@ def generate_draft(draft_name):
 	try:
 		frappe.set_user(initial.requested_by)
 		check_reviewer()
-		with frappe.cache.lock("auto-pex-generation:" + draft_name, timeout=1900, blocking_timeout=1):
+		with frappe.cache.lock(
+			"auto-pex-generation:" + draft_name, timeout=GENERATION_TIMEOUT + 120, blocking_timeout=1
+		):
 			draft = frappe.get_doc(DRAFT, draft_name)
 			if draft.status != "Queued":
 				return
@@ -254,14 +270,33 @@ def generate_draft(draft_name):
 			_persist(draft)
 			frappe.db.commit()
 			context = history.fetch_history(doc, settings)
+			validate_settings_content(settings, require_content=True)
 			catalog = history.medication_catalog(context, settings)
 			digest = context_hash(context, catalog)
 			# Persist source evidence before calling the model, so failures are reviewable.
 			draft.context_json = json.dumps(context, default=str)
 			draft.catalog_json = json.dumps(catalog, default=str)
 			draft.context_hash = digest
+			draft.configuration_json = audit_configuration(settings, provider.instructions_for(settings))
 			_persist(draft)
 			frappe.db.commit()
+
+			def persist_reports():
+				draft.context_json = json.dumps(context, default=str)
+				_persist(draft)
+				frappe.db.commit()
+
+			reports.extract(context, settings, persist_reports)
+			if context.get("attached_reports"):
+				frappe.db.rollback()
+				fresh_doc = frappe.get_doc("Patient Encounter", draft.encounter)
+				_current(draft, get_settings(), fresh_doc)
+				fresh_context = history.fetch_history(fresh_doc, settings)
+				if digest != context_hash(fresh_context, history.medication_catalog(fresh_context, settings)):
+					raise DraftError(
+						"Clinical records or reports changed while reports were read. Regenerate the draft."
+					)
+				frappe.db.rollback()
 			proposal, response_id, usage = provider.generate(context, catalog, settings)
 			validate_proposal(proposal, history.source_ids(context), settings.max_medications)
 			history.validate_catalog(proposal, catalog)
@@ -287,9 +322,16 @@ def generate_draft(draft_name):
 			draft.original_response = json.dumps(proposal)
 			draft.response_id, draft.usage_json = response_id, json.dumps(usage)
 			draft.summary, draft.instruction = proposal["summary"], proposal["instruction"]
-			warnings = proposal["warnings"] + proposal["missing_information"]
+			warnings = (
+				proposal["warnings"]
+				+ proposal["missing_information"]
+				+ investigations.warnings(context)
+				+ reports.warnings(context)
+			)
 			if context["truncated"]:
-				warnings.append("History was limited by the configured encounter count; review completeness.")
+				warnings.append(
+					"History was limited by the configured history window or encounter/investigation count; review completeness."
+				)
 			if any(record["docstatus"] == 0 for record in context["previous"]):
 				warnings.append(
 					"History includes unsubmitted encounters. Confirm which prescriptions were authorized."
@@ -338,11 +380,15 @@ def proposal_from_draft(draft):
 					"dosage",
 					"period",
 					"dosage_form",
+					"dispensing_uom",
 					"instruction",
 					"rationale",
 				)
 			}
-			| {"source_ids": json.loads(row.source_ids or "[]")}
+			| {
+				"source_ids": json.loads(row.source_ids or "[]"),
+				"dispensing_quantity": row.get("dispensing_quantity"),
+			}
 			for row in draft.items
 		]
 	except (TypeError, ValueError):
@@ -393,14 +439,29 @@ def approve_draft(name, modified):
 	draft = frappe.get_doc(DRAFT, name, for_update=True)
 	if str(draft.modified) != str(modified) or draft.status not in ("Ready", "Needs Review"):
 		frappe.throw("The draft changed. Reload it before continuing.", frappe.TimestampMismatchError)
+	for source in sorted(context.get("attached_reports", []), key=lambda source: source["id"]):
+		try:
+			frappe.get_doc("File", source["file_id"], for_update=True)
+		except frappe.DoesNotExistError:
+			changed = True
 	if settings.history_source == "Local read-only API":
 		# Lock all local source parents and patient history before the final comparison and write.
 		frappe.get_doc("Patient", doc.patient, for_update=True)
 		for source in sorted(context["previous"], key=lambda source: source["id"]):
 			frappe.get_doc("Patient Encounter", source["id"], for_update=True)
+		for source in sorted(context.get("investigations", []), key=lambda source: source["id"]):
+			try:
+				frappe.get_doc(source["doctype"], source["name"], for_update=True)
+			except frappe.DoesNotExistError:
+				# The following history comparison detects deletion and marks the draft stale.
+				pass
 		context = history.fetch_history(doc, settings)
 		catalog = history.medication_catalog(context, settings)
 		changed = draft.context_hash != context_hash(context, catalog)
+	if settings.history_source != "Local read-only API" and "attached_reports" in context:
+		changed = (
+			changed or reports.manifest(doc, context, local_history=False) != context["attached_reports"]
+		)
 	if changed or fingerprint(encounter_snapshot(doc)) != draft.input_hash:
 		draft.status = "Stale"
 		_persist(draft)
@@ -426,10 +487,15 @@ def approve_draft(name, modified):
 			values = {key: row[key] for key in ("medication", "drug_code", "dosage", "period", "dosage_form")}
 			values.update(strength=medicine["strength"], strength_uom=medicine["strength_uom"])
 			child_meta = frappe.get_meta(doc.meta.get_field(table).options)
-			instruction_field = (
-				"sr_drug_instruction" if child_meta.has_field("sr_drug_instruction") else "comment"
-			)
-			values[instruction_field] = row["instruction"]
+			for field in ("auto_pex_dispensing_quantity", "auto_pex_dispensing_uom", "comment"):
+				if not child_meta.has_field(field):
+					raise DraftError(
+						"Prescription quantity/instruction fields are missing. Run the Auto Pex migration."
+					)
+			values["auto_pex_dispensing_quantity"] = row["dispensing_quantity"]
+			values["auto_pex_dispensing_uom"] = row["dispensing_uom"]
+			# sr_drug_instruction is a Link, so free text belongs in the standard comment field.
+			values["comment"] = row["instruction"]
 			doc.append(table, values)
 	with service_write():
 		if doc.meta.has_field("sr_medication_template"):
@@ -488,11 +554,26 @@ def draft_permission(doc, user=None, ptype=None):
 		return False
 	# Access to stored local source snapshots cannot outlive access to their source encounters.
 	context = json.loads(doc.context_json or "{}")
+	for source in context.get("attached_reports", []):
+		try:
+			if not frappe.has_permission("File", "read", doc=source["file_id"], user=user):
+				return False
+		except frappe.DoesNotExistError:
+			return False
 	for source in context.get("previous", []):
 		if frappe.db.exists("Patient Encounter", source["id"]) and not frappe.has_permission(
 			"Patient Encounter", "read", doc=source["id"], user=user
 		):
 			return False
+	if context.get("investigation_source") != "Remote read-only API":
+		for source in context.get("investigations", []):
+			if source.get("doctype") not in investigations.SOURCE_FIELDS:
+				return False
+			try:
+				if not frappe.has_permission(source["doctype"], "read", doc=source["name"], user=user):
+					return False
+			except frappe.DoesNotExistError:
+				return False
 	return None
 
 

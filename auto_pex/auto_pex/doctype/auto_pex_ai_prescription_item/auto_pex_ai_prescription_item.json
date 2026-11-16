@@ -10,6 +10,8 @@
   "dosage",
   "period",
   "dosage_form",
+  "dispensing_quantity",
+  "dispensing_uom",
   "instruction",
   "rationale",
   "source_ids"
@@ -40,7 +42,7 @@
   },
   {
    "fieldname": "dosage",
-   "label": "Dosage",
+   "label": "Dosage / Frequency",
    "fieldtype": "Link",
    "options": "Prescription Dosage",
    "reqd": 1,
@@ -76,6 +78,21 @@
    "fieldname": "source_ids",
    "label": "Source IDs (JSON array)",
    "fieldtype": "Small Text",
+   "reqd": 1
+  },
+  {
+   "fieldname": "dispensing_quantity",
+   "label": "Dispensing Quantity",
+   "fieldtype": "Float",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Total quantity to supply, not the dose per administration."
+  },
+  {
+   "fieldname": "dispensing_uom",
+   "label": "Dispensing Unit",
+   "fieldtype": "Link",
+   "options": "UOM",
    "reqd": 1
   }
  ],

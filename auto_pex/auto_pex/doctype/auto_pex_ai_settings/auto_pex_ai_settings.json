@@ -20,6 +20,7 @@
   "request_timeout",
   "retry_limit",
   "max_medications",
+  "medicine_catalog",
   "prescribing_constraints",
   "additional_medications",
   "medication_rules"
@@ -37,13 +38,13 @@
    "label": "Automation User",
    "fieldtype": "Link",
    "options": "User",
-   "description": "Enabled reviewer with access to the encounters, patients and prescription catalogs. Background generation uses this user's permissions."
+   "description": "Enabled reviewer with read access to encounters, patients, laboratory results, attached Files and prescription catalogs. Background generation uses this user\u2019s permissions."
   },
   {
    "fieldname": "additional_medications",
    "label": "Additional Permitted Medications",
    "fieldtype": "Small Text",
-   "description": "Optional exact Medication IDs, one per line. The AI catalog otherwise contains active medications from previous prescriptions."
+   "description": "Exact Medication IDs, one per line. Combined with pasted catalog and historical medications (150 unique IDs maximum). Enforced Medication Rules always apply."
   },
   {
    "fieldname": "enabled",
@@ -78,7 +79,8 @@
   {
    "fieldname": "model",
    "label": "OpenAI Model",
-   "fieldtype": "Data"
+   "fieldtype": "Data",
+   "description": "Use a model supporting Responses Structured Outputs and PDF/image inputs. Attached encounter reports are read before prescribing, with an additional request per report."
   },
   {
    "fieldname": "openai_api_key",
@@ -107,13 +109,15 @@
    "fieldname": "history_days",
    "label": "History Lookback (days)",
    "fieldtype": "Int",
-   "default": "365"
+   "default": "365",
+   "description": "Lookback for encounters and laboratory results, through the current encounter date."
   },
   {
    "fieldname": "history_limit",
    "label": "Maximum History Encounters",
    "fieldtype": "Int",
-   "default": "20"
+   "default": "20",
+   "description": "Maximum prior encounters, and independently the maximum combined Lab Test / laboratory Observation records. Truncation is flagged for review."
   },
   {
    "fieldname": "request_timeout",
@@ -135,9 +139,15 @@
   },
   {
    "fieldname": "prescribing_constraints",
-   "label": "Clinician-approved Prescribing Constraints",
+   "label": "Prescription Instructions / Prompt",
    "fieldtype": "Long Text",
-   "description": "Required before enabling. Guidance for the model, in addition to mandatory application checks; not a clinical interaction checker."
+   "description": "Complete team-maintained prescribing instructions, sent with every request. Maximum 200,000 UTF-8 bytes. Enforced Medication Rules and exact ERP validation always apply."
+  },
+  {
+   "fieldname": "medicine_catalog",
+   "label": "Medicine Catalog and Formulations",
+   "fieldtype": "Long Text",
+   "description": "Paste CSV with required medication_id,formulation; optional code,name,drug_code. Quote commas and multiline values. Maximum 500,000 UTF-8 bytes and 150 unique medicines across pasted, additional and historical lists. No content is truncated."
   }
  ],
  "sort_field": "modified",
